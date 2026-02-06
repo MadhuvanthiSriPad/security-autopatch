@@ -2,7 +2,6 @@ import base64
 import json
 import os
 import sqlite3
-import tempfile
 import unittest
 
 from app import app

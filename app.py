@@ -3,7 +3,7 @@ Vulnerable Flask application for CodeQL testing.
 Contains intentional security vulnerabilities that CodeQL will detect.
 """
 
-from flask import Flask, request, render_template_string, abort
+from flask import Flask, request, render_template_string, abort, send_from_directory
 import sqlite3
 import os
 import subprocess
@@ -56,12 +56,7 @@ def ping():
 @app.route('/read')
 def read_file():
     filename = request.args.get('file')
-    base_dir = os.path.realpath('/var/data/')
-    filepath = os.path.realpath(os.path.join(base_dir, filename))
-    if not (filepath == base_dir or filepath.startswith(base_dir + os.sep)):
-        abort(400, "Invalid file path")
-    with open(filepath, 'r') as f:
-        return f.read()
+    return send_from_directory('/var/data/', filename)
 
 
 # VULNERABILITY 6: Insecure Deserialization
