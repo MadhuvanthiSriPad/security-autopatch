@@ -10,7 +10,8 @@ import json
 import os
 import sys
 import time
-from typing import Any, Dict, List
+import hashlib
+from typing import Any, Dict, List, Optional
 
 import requests
 
@@ -67,6 +68,25 @@ def chunk(items: List[Any], size: int):
         yield i // size, items[i : i + size]
 
 
+def alerts_fingerprint(alerts: List[Dict[str, Any]]) -> str:
+    """Stable fingerprint so we can avoid duplicate PRs for the same alert set."""
+    nums = sorted(str(a.get("number")) for a in alerts if a.get("number") is not None)
+    joined = ",".join(nums)
+    return hashlib.sha1(joined.encode()).hexdigest()[:8]
+
+
+def existing_pr_for_branch(token: str, owner: str, repo: str, branch: str) -> Optional[str]:
+    url = f"{GITHUB_API}/repos/{owner}/{repo}/pulls"
+    params = {"state": "open", "head": f"{owner}:{branch}", "per_page": 1}
+    resp = requests.get(url, headers=gh_headers(token), params=params, timeout=30)
+    if resp.status_code != 200:
+        raise RuntimeError(f"GitHub PR lookup failed: {resp.status_code} {resp.text}")
+    prs = resp.json()
+    if prs:
+        return prs[0].get("html_url")
+    return None
+
+
 def summarize_alert(alert: Dict[str, Any]) -> Dict[str, Any]:
     instance = alert.get("most_recent_instance", {})
     location = instance.get("location", {})
@@ -90,6 +110,7 @@ def submit_to_devin(
     repo: Dict[str, Any],
     batch_index: int,
     alerts: List[Dict[str, Any]],
+    branch: str,
 ) -> Dict[str, Any]:
     payload = {
         "repository": {
@@ -98,6 +119,7 @@ def submit_to_devin(
             "default_branch": repo["default_branch"],
         },
         "batch_index": batch_index,
+        "branch": branch,
         "alerts": [summarize_alert(a) for a in alerts],
     }
     headers = {
@@ -154,8 +176,14 @@ def main() -> int:
         if processed_batches >= MAX_BATCHES:
             lines.append(f"Skipping remaining alerts after reaching MAX_BATCHES={MAX_BATCHES}.")
             break
-        print(f"Submitting batch {batch_index} with {len(batch)} alerts to Devin...")
-        submission = submit_to_devin(devin_url, devin_key, repo, batch_index, batch)
+        branch_name = f"devin-codeql-batch-{alerts_fingerprint(batch)}"
+        existing_pr = existing_pr_for_branch(token, owner, repo_name, branch_name)
+        if existing_pr:
+            lines.append(f"ℹ️ Batch {batch_index}: PR already open {existing_pr}; skipping to keep idempotent.")
+            continue
+
+        print(f"Submitting batch {batch_index} with {len(batch)} alerts to Devin on branch {branch_name}...")
+        submission = submit_to_devin(devin_url, devin_key, repo, batch_index, batch, branch_name)
         job_id = submission.get("job_id") or submission.get("id")
         result = submission
         if job_id:

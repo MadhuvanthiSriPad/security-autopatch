@@ -13,6 +13,12 @@ on:
         default: '3'
   schedule:
     - cron: '15 5 * * 1' # Mondays at 05:15 UTC
+  push:
+    branches: [main]
+
+concurrency:
+  group: devin-codeql-fixer-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: write
