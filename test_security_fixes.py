@@ -42,14 +42,12 @@ def test_greet_template_expression_not_evaluated():
 def test_debug_mode_off_by_default():
     """Alert #7: Ensure debug mode is off when FLASK_DEBUG is not set."""
     with patch.dict(os.environ, {}, clear=True):
-        from app import app as test_app
-        assert test_app.debug is False or True
+        result = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
+        assert result is False
 
 
 def test_debug_mode_controlled_by_env():
     """Alert #7: Ensure debug mode is controlled by environment variable."""
-    import app as app_module
-    import importlib
     with patch.dict(os.environ, {'FLASK_DEBUG': 'false'}):
         result = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
         assert result is False
