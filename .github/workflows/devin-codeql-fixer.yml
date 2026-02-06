@@ -1,0 +1,46 @@
+name: Devin CodeQL Fixer
+
+on:
+  workflow_dispatch:
+    inputs:
+      batch_size:
+        description: 'Alerts per batch'
+        required: false
+        default: '3'
+      max_batches:
+        description: 'Maximum batches per run'
+        required: false
+        default: '3'
+  schedule:
+    - cron: '15 5 * * 1' # Mondays at 05:15 UTC
+
+permissions:
+  contents: write
+  pull-requests: write
+  security-events: read
+
+jobs:
+  fix-codeql:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run Devin CodeQL fixer
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEVIN_API_URL: ${{ secrets.DEVIN_API_URL }}
+          DEVIN_API_KEY: ${{ secrets.DEVIN_API_KEY }}
+          BATCH_SIZE: ${{ github.event.inputs.batch_size || '3' }}
+          MAX_BATCHES: ${{ github.event.inputs.max_batches || '3' }}
+        run: python scripts/devin_codeql_fixer.py
