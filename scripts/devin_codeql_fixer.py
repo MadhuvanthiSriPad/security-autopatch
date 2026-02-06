@@ -112,6 +112,9 @@ def submit_to_devin(
     alerts: List[Dict[str, Any]],
     branch: str,
 ) -> Dict[str, Any]:
+    base = url.rstrip("/")
+    if not base.endswith("/v1"):
+        base = base + "/v1"
     payload = {
         "repository": {
             "full_name": repo["full_name"],
@@ -126,7 +129,7 @@ def submit_to_devin(
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
-    resp = requests.post(f"{url.rstrip('/')}/codeql/fix", headers=headers, json=payload, timeout=60)
+    resp = requests.post(f"{base}/codeql/fix", headers=headers, json=payload, timeout=60)
     if resp.status_code not in (200, 201, 202):
         raise RuntimeError(f"Devin submission failed: {resp.status_code} {resp.text}")
     return resp.json()
