@@ -58,7 +58,7 @@ def read_file():
     filename = request.args.get('file')
     base_dir = os.path.realpath('/var/data/')
     filepath = os.path.realpath(os.path.join(base_dir, filename))
-    if not filepath.startswith(base_dir):
+    if not (filepath == base_dir or filepath.startswith(base_dir + os.sep)):
         abort(400, "Invalid file path")
     with open(filepath, 'r') as f:
         return f.read()
