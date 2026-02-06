@@ -9,6 +9,8 @@ import os
 import subprocess
 import pickle
 import base64
+import bcrypt
+from markupsafe import escape
 
 app = Flask(__name__)
 
@@ -40,8 +42,8 @@ def get_user():
 @app.route('/greet')
 def greet():
     name = request.args.get('name', 'Guest')
-    # Directly rendering user input without escaping
-    return render_template_string(f"<h1>Hello, {name}!</h1>")
+    safe_name = escape(name)
+    return render_template_string("<h1>Hello, {{ name }}!</h1>", name=safe_name)
 
 
 # VULNERABILITY 4: Command Injection
@@ -73,16 +75,12 @@ def load_data():
     return str(obj)
 
 
-# VULNERABILITY 7: Weak Cryptography
-import hashlib
-
 @app.route('/hash')
 def hash_password():
     password = request.args.get('password')
-    # Using weak MD5 hash
-    hashed = hashlib.md5(password.encode()).hexdigest()
-    return hashed
+    hashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt())
+    return hashed.decode()
 
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=os.environ.get('FLASK_DEBUG', 'false').lower() == 'true')
