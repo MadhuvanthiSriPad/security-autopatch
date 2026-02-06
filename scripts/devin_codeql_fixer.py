@@ -104,7 +104,27 @@ def summarize_alert(alert: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def submit_to_devin(
+def create_session_payload(repo: Dict[str, Any], branch: str, batch_index: int, alerts: List[Dict[str, Any]]) -> Dict[str, Any]:
+    alerts_text = json.dumps([summarize_alert(a) for a in alerts], indent=2)
+    prompt = f"""
+You are Devin acting as an automated security engineer.
+Repository: {repo['clone_url']} (default branch: {repo['default_branch']})
+Create or update branch: {branch}
+Task: Fix these CodeQL alerts thoroughly (no suppressions, no shallow changes), add tests if needed, and open a PR. Keep commits minimal and focused.
+Alerts JSON:
+{alerts_text}
+Acceptance:
+- Resolve each alert root cause.
+- Ensure CI passes.
+- If a PR already exists for the same branch, reuse it.
+"""
+    return {
+        "prompt": prompt.strip(),
+        "tags": ["codeql-fix", f"batch-{batch_index}"],
+    }
+
+
+def submit_to_devin_session(
     url: str,
     api_key: str,
     repo: Dict[str, Any],
@@ -115,38 +135,32 @@ def submit_to_devin(
     base = url.rstrip("/")
     if not base.endswith("/v1"):
         base = base + "/v1"
-    payload = {
-        "repository": {
-            "full_name": repo["full_name"],
-            "clone_url": repo["clone_url"],
-            "default_branch": repo["default_branch"],
-        },
-        "batch_index": batch_index,
-        "branch": branch,
-        "alerts": [summarize_alert(a) for a in alerts],
-    }
+    payload = create_session_payload(repo, branch, batch_index, alerts)
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
     }
-    resp = requests.post(f"{base}/codeql/fix", headers=headers, json=payload, timeout=60)
+    resp = requests.post(f"{base}/sessions", headers=headers, json=payload, timeout=60)
     if resp.status_code not in (200, 201, 202):
         raise RuntimeError(f"Devin submission failed: {resp.status_code} {resp.text}")
     return resp.json()
 
 
-def poll_devin(url: str, api_key: str, job_id: str) -> Dict[str, Any]:
+def poll_devin_session(url: str, api_key: str, session_id: str) -> Dict[str, Any]:
+    base = url.rstrip("/")
+    if not base.endswith("/v1"):
+        base = base + "/v1"
     headers = {"Authorization": f"Bearer {api_key}"}
     for _ in range(POLL_LIMIT):
-        resp = requests.get(f"{url.rstrip('/')}/jobs/{job_id}", headers=headers, timeout=30)
+        resp = requests.get(f"{base}/sessions/{session_id}", headers=headers, timeout=30)
         if resp.status_code != 200:
             raise RuntimeError(f"Devin poll failed: {resp.status_code} {resp.text}")
         body = resp.json()
-        status = body.get("status")
-        if status in {"succeeded", "failed"}:
+        status = body.get("status") or body.get("status_enum")
+        if status in {"completed", "succeeded", "failed"}:
             return body
         time.sleep(POLL_SECONDS)
-    raise RuntimeError("Devin job polling timed out")
+    raise RuntimeError("Devin session polling timed out")
 
 
 def write_summary(lines: List[str]):
@@ -186,15 +200,23 @@ def main() -> int:
             continue
 
         print(f"Submitting batch {batch_index} with {len(batch)} alerts to Devin on branch {branch_name}...")
-        submission = submit_to_devin(devin_url, devin_key, repo, batch_index, batch, branch_name)
-        job_id = submission.get("job_id") or submission.get("id")
+        submission = submit_to_devin_session(devin_url, devin_key, repo, batch_index, batch, branch_name)
+        session_id = submission.get("session_id") or submission.get("id")
         result = submission
-        if job_id:
-            result = poll_devin(devin_url, devin_key, job_id)
+        if session_id:
+            result = poll_devin_session(devin_url, devin_key, session_id)
 
         status = result.get("status", "unknown")
-        pr_url = result.get("pr_url") or result.get("pull_request", {}).get("html_url")
-        branch = result.get("branch") or result.get("pull_request", {}).get("head", {}).get("ref")
+        pr_url = (
+            result.get("pr_url")
+            or result.get("pull_request", {}).get("html_url")
+            or result.get("pull_request_url")
+        )
+        branch = (
+            result.get("branch")
+            or result.get("pull_request", {}).get("head", {}).get("ref")
+            or branch_name
+        )
 
         if status != "succeeded":
             lines.append(f"❌ Batch {batch_index}: Devin reported status '{status}'.")
