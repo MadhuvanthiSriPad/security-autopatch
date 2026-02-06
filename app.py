@@ -3,11 +3,11 @@ Vulnerable Flask application for CodeQL testing.
 Contains intentional security vulnerabilities that CodeQL will detect.
 """
 
-from flask import Flask, request, render_template_string
+from flask import Flask, request, render_template_string, abort, send_from_directory
 import sqlite3
 import os
 import subprocess
-import pickle
+import json
 import base64
 
 app = Flask(__name__)
@@ -28,9 +28,8 @@ def get_user():
     user_id = request.args.get('id')
     conn = get_db_connection()
     cursor = conn.cursor()
-    # Directly interpolating user input into SQL query
-    query = f"SELECT * FROM users WHERE id = {user_id}"
-    cursor.execute(query)
+    query = "SELECT * FROM users WHERE id = ?"
+    cursor.execute(query, (user_id,))
     result = cursor.fetchone()
     conn.close()
     return str(result)
@@ -57,19 +56,15 @@ def ping():
 @app.route('/read')
 def read_file():
     filename = request.args.get('file')
-    # No validation of file path
-    filepath = os.path.join('/var/data/', filename)
-    with open(filepath, 'r') as f:
-        return f.read()
+    return send_from_directory('/var/data/', filename)
 
 
 # VULNERABILITY 6: Insecure Deserialization
 @app.route('/load')
 def load_data():
     data = request.args.get('data')
-    # Deserializing untrusted data
     decoded = base64.b64decode(data)
-    obj = pickle.loads(decoded)
+    obj = json.loads(decoded)
     return str(obj)
 
 
